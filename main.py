@@ -1,17 +1,14 @@
 import telebot
 from telebot import types
-import google.generativeai as genai
-import os
+from mistralai.client import MistralClient
+from mistralai.models.chat_completion import ChatMessage
 
-# --- الإعدادات (التوكنات الخاصة بك) ---
+# --- الإعدادات الخاصة بك ---
 API_TOKEN = '8769168225:AAHaBx5_INz6kE0dR9LV6mQx0Ko-gIGP31E'
-GEMINI_KEY = 'AIzaSyA2qLp82TZEiG_ueY1IAnVx_pj3km0hk6k'
+MISTRAL_API_KEY = 'Y4UUIW4EaWIv2i7ZrNYICRgYMYS7vTHb'
 
 bot = telebot.TeleBot(API_TOKEN)
-
-# إعداد محرك الذكاء الاصطناعي (Gemini)
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-pro')
+client = MistralClient(api_key=MISTRAL_API_KEY)
 
 # القائمة الرئيسية
 def main_markup():
@@ -20,15 +17,15 @@ def main_markup():
     markup.add(btn_ar)
     return markup
 
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
+@bot.message_handler(commands=['start'])
+def start(message):
     bot.send_message(
         message.chat.id, 
-        "أهلاً بك في بوت الترجمة الاحترافية.\nاضغط على الزر بالأسفل ثم أرسل أي نص سأقوم بترجمته فوراً.",
+        "أهلاً بك! بوت الترجمة الاحترافية المدعوم بـ Mistral AI جاهز.\nاضغط على الزر بالأسفل ثم أرسل النص.",
         reply_markup=main_markup()
     )
 
-# حالة المستخدم (للتأكد أنه ضغط على الزر)
+# تخزين حالة المستخدم
 user_states = {}
 
 @bot.message_handler(func=lambda message: True)
@@ -37,31 +34,38 @@ def handle_messages(message):
     text = message.text
 
     if text == '🇸🇦 ترجمة أي لغة إلى العربية':
-        user_states[cid] = 'waiting_for_text'
-        bot.send_message(cid, "حسناً، أرسل الآن النص (بالإنجليزية، الفرنسية، أو غيرها) وسأحوله للعربية.")
+        user_states[cid] = 'waiting_text'
+        bot.send_message(cid, "حسناً، أرسل النص الآن (الإنجليزية، الفرنسية، إلخ) وسأحوله للعربية فوراً.")
     
-    elif cid in user_states and user_states[cid] == 'waiting_for_text':
-        # إظهار حالة "جاري الكتابة" لإعطاء انطباع احترافي
+    elif cid in user_states and user_states[cid] == 'waiting_text':
         bot.send_chat_action(cid, 'typing')
-        
         try:
-            # البرومبت المخصص للذكاء الاصطناعي لضمان جودة الترجمة
-            prompt = (
-                f"أنت مترجم محترف. قم بترجمة النص التالي إلى لغة عربية فصحى، بليغة، "
-                f"ومناسبة للسياق. تجنب الترجمة الحرفية تماماً:\n\n{text}"
+            # صياغة الطلب لـ Mistral
+            instruction = (
+                "You are a professional translator. Translate the following text into "
+                "pure, eloquent, and natural-sounding Arabic. Do not provide literal translation: "
             )
             
-            response = model.generate_content(prompt)
+            messages = [
+                ChatMessage(role="user", content=f"{instruction}\n\n{text}")
+            ]
             
-            # إرسال النتيجة للمستخدم
-            bot.reply_to(message, response.text)
+            # تنفيذ الترجمة باستخدام موديل mistral-medium (أو mistral-tiny للسرعة)
+            chat_response = client.chat(
+                model="mistral-medium",
+                messages=messages,
+            )
             
-            # ملاحظة: لم نحذف الحالة هنا لكي يستطيع المستخدم إرسال نصوص متتالية وترجمتها مباشرة
+            result = chat_response.choices[0].message.content
+            bot.reply_to(message, result)
+            
         except Exception as e:
-            bot.reply_to(message, "عذراً، حدث خطأ في معالجة الطلب. يرجى المحاولة لاحقاً.")
+            # تنبيه في حال وجود مشكلة في المفتاح أو الخدمة
+            bot.reply_to(message, f"عذراً، حدث خطأ في الاتصال بـ Mistral. تأكد من رصيد الحساب أو المحاولة لاحقاً.")
+            print(f"Error: {e}")
     else:
         bot.send_message(cid, "من فضلك اضغط على الزر أولاً لبدء الترجمة.", reply_markup=main_markup())
 
-# تشغيل البوت باستمرار
-print("البوت يعمل الآن...")
+# تشغيل البوت
+print("Mistral Bot is running...")
 bot.infinity_polling()
